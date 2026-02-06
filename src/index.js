@@ -40,44 +40,41 @@ function verifyShopifyAppProxy(req) {
   if (!secret)
     return { ok: false, reason: "Missing SHOPIFY_API_SECRET env var" }
 
-  // copy query params for mutations later..
-  const q = { ...req.query }
+  // Shopify App Proxy uses `signature` (hex HMAC-SHA256)
+  const { signature } = req.query
+  if (!signature) return { ok: false, reason: "Missing signature query param" }
 
-  // Shopify may send: signature OR hmac
-  const provided =
-    (q.signature ? String(q.signature) : "") || (q.hmac ? String(q.hmac) : "")
+  // Build "key=value" strings for all params except signature
+  const kvPairs = Object.keys(req.query)
+    .filter((k) => k !== "signature")
+    .map((k) => {
+      const v = req.query[k]
 
-  if (!provided)
-    return { ok: false, reason: "Missing signature/hmac query param" }
-
-  // Remove signature fields before computing
-  delete q.signature
-  delete q.hmac
-
-  // Build message in the canonical format: key=value pairs joined by &
-  // Sort keys lexicographically.
-  const message = Object.keys(q)
+      // repeated params become arrays -> join with comma
+      const value = Array.isArray(v) ? v.join(",") : v ?? ""
+      return `${k}=${value}`
+    })
+    // IMPORTANT: Shopify sorts the *strings*, not just the keys
     .sort()
-    .map((k) => `${k}=${Array.isArray(q[k]) ? q[k].join(",") : q[k]}`)
-    .join("&")
+    // IMPORTANT: Shopify concatenates with NO delimiter
+    .join("")
 
-  // Shopify "signature" is typically hex HMAC-SHA256 of the message
-  // Shopify "hmac" is typically hex too for proxy requests
-  const digestHex = crypto
+  const calculated = crypto
     .createHmac("sha256", secret)
-    .update(message)
+    .update(kvPairs)
     .digest("hex")
 
-  // Timing-safe compare
-  const a = Buffer.from(digestHex, "utf8")
-  const b = Buffer.from(provided, "utf8")
+  const a = Buffer.from(calculated, "utf8")
+  const b = Buffer.from(String(signature), "utf8")
 
   if (a.length !== b.length)
     return { ok: false, reason: "Signature length mismatch" }
 
-  const match = crypto.timingSafeEqual(a, b)
-  return match ? { ok: true } : { ok: false, reason: "Invalid signature" }
+  return crypto.timingSafeEqual(a, b)
+    ? { ok: true }
+    : { ok: false, reason: "Invalid signature" }
 }
+
 
 // for shopify app proxy to call
 app.post("/backorder", async (req, res) => {
