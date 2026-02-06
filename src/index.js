@@ -17,6 +17,10 @@ app.use(express.json({ limit: "256kb" }))
 
 // Health check
 app.get("/health", (_req, res) => res.status(200).send({ ok: true }))
+// For Shopify App Proxy to check if the backend is alive
+app.get("/backorder", (_req, res) => {
+  res.status(200).send("Backorder proxy OK. Use POST /backorder.")
+})
 
 /**
  * Shopify App Proxy endpoint
